@@ -23,7 +23,8 @@ contract TokenFactory {
 
     mapping(address => memeToken) public addressToMemeTokenMapping;
 
-    uint MEMETOKEN_CREATION_PLATFORM_FEE = 0.0001 ether;
+    uint MEMETOKEN_CREATION_PLATFORM_FEE = 0.0002 ether;
+    uint REFERRAL_CREATION_FEE = 0.0001 ether;
     uint MEMECOIN_FUNDING_DEADLINE_DURATION = 10 days;
     uint MEMECOIN_FUNDING_GOAL = 24 ether;
     address public admin;
@@ -91,15 +92,26 @@ contract TokenFactory {
         return sum;
     }
 
-    function createMemeToken(string memory name, string memory symbol, string memory imageUrl, string memory description) public payable returns(address) {
+    function createMemeToken(string memory name, string memory symbol, string memory imageUrl, string memory description, address referral) public payable returns(address) {
         require(tradingEnabled == true, "trading is disabled");
         //should deploy the meme token, mint the initial supply to the token factory contract
         require(msg.value>= MEMETOKEN_CREATION_PLATFORM_FEE, "fee not paid for memetoken creation");
         Token ct = new Token(name, symbol, INIT_SUPPLY);
         address memeTokenAddress = address(ct);
-        memeToken memory newlyCreatedToken = memeToken(name, symbol, description, imageUrl, 0, memeTokenAddress, msg.sender);
+        memeToken memory newlyCreatedToken = memeToken(
+            name, 
+            symbol, 
+            description, 
+            imageUrl, 
+            0, 
+            memeTokenAddress,
+            msg.sender
+        );
         memeTokenAddresses.push(memeTokenAddress);
         addressToMemeTokenMapping[memeTokenAddress] = newlyCreatedToken;
+        if(referral != address(0)) {
+            payable(referral).transfer(REFERRAL_CREATION_FEE);
+        }
         return memeTokenAddress;
     }
 
@@ -111,71 +123,74 @@ contract TokenFactory {
         return allTokens;
     }
 
-    function buyMemeToken(address memeTokenAddress, uint tokenQty) public payable returns(uint) {
+    function buyMemeToken(
+        address memeTokenAddress, 
+        uint tokenQty, 
+        address referral
+    ) public payable returns (uint) {
         require(tradingEnabled == true, "trading is disabled");
-        //check if memecoin is listed
-        require(addressToMemeTokenMapping[memeTokenAddress].tokenAddress!=address(0), "Token is not listed");
-        
-        memeToken storage listedToken = addressToMemeTokenMapping[memeTokenAddress];
+        // Check if memecoin is listed
+        require(addressToMemeTokenMapping[memeTokenAddress].tokenAddress != address(0), "Token is not listed");
 
+        memeToken storage listedToken = addressToMemeTokenMapping[memeTokenAddress];
         Token memeTokenCt = Token(memeTokenAddress);
 
-        // check to ensure funding goal is not met
+        // Ensure funding goal is not met
         require(listedToken.fundingRaised <= MEMECOIN_FUNDING_GOAL, "Funding has already been raised");
 
-        // check to ensure there is enough supply to facilitate the purchase
+        // Ensure there is enough supply to facilitate the purchase
         uint currentSupply = memeTokenCt.totalSupply();
-        console.log("Current supply of token is ", currentSupply);
-        console.log("Max supply of token is ", MAX_SUPPLY);
         uint available_qty = MAX_SUPPLY - currentSupply;
-        console.log("Qty available for purchase ",available_qty);
-
         uint scaled_available_qty = available_qty / DECIMALS;
         uint tokenQty_scaled = tokenQty * DECIMALS;
-
         require(tokenQty <= scaled_available_qty, "Not enough available supply");
 
-        // calculate the cost for purchasing tokenQty tokens as per the exponential bonding curve formula
+        // Calculate the cost for purchasing tokens
         uint currentSupplyScaled = (currentSupply - INIT_SUPPLY) / DECIMALS;
         uint requiredEth = calculateCost(currentSupplyScaled, tokenQty);
-
-        console.log("ETH required for purchasing meme tokens is ",requiredEth);
-
-        // check if user has sent correct value of eth to facilitate this purchase
         require(msg.value >= requiredEth, "Incorrect value of ETH sent");
 
-        // Incerement the funding
-        listedToken.fundingRaised+= msg.value;
+        // Calculate the referral fee (0.5% of the ETH sent)  **update to QOM**
+        uint referralFee = (msg.value * 5) / 1000;
 
-        if(listedToken.fundingRaised >= MEMECOIN_FUNDING_GOAL){
-            // create liquidity pool
+        // If referral is provided and valid, transfer the referral fee
+        if (referral != address(0)) {
+            payable(referral).transfer(referralFee);
+        } else {
+            referralFee = 0; // No referral fee if no referral address is provided
+        }
+
+        // Adjust the required ETH to exclude the referral fee
+        uint adjustedEth = msg.value - referralFee;
+
+        // Increment the funding raised with the adjusted ETH
+        listedToken.fundingRaised += adjustedEth;
+
+        // Check if funding goal is met
+        if (listedToken.fundingRaised >= MEMECOIN_FUNDING_GOAL) {
+            // Create liquidity pool
             address pool = _createLiquidityPool(memeTokenAddress);
-            console.log("Pool address ", pool);
 
-            // provide liquidity
+            // Provide liquidity
             uint tokenAmount = INIT_SUPPLY;
             uint ethAmount = listedToken.fundingRaised;
             uint liquidity = _provideLiquidity(memeTokenAddress, tokenAmount, ethAmount);
-            console.log("Uniswap provided liquidty ", liquidity);
 
-            // burn lp token
+            // Burn LP tokens
             _burnLpTokens(pool, liquidity);
         }
 
-        // mint the tokens
+        // Mint the tokens for the user
         memeTokenCt.mint(tokenQty_scaled, msg.sender);
 
-        console.log("User balance of the tokens is ", memeTokenCt.balanceOf(msg.sender));
-
-        console.log("New available qty ", MAX_SUPPLY - memeTokenCt.totalSupply());
-
+        // Emit events for buy and price change
         uint256 mCap = uint256(calculateCost(currentSupplyScaled, 1)) * MAX_SUPPLY;
-
         emit Buy(block.timestamp, msg.sender, tokenQty_scaled, requiredEth);
         emit PriceChange(block.timestamp, uint256(calculateCost(currentSupplyScaled, 1)), mCap);
 
         return 1;
     }
+
 
     function sellMemeToken(address memeTokenAddress, uint tokenQty) public returns (uint) {
         require(tradingEnabled == true, "trading is disabled");
@@ -241,6 +256,21 @@ contract TokenFactory {
         uniswapv2pairct.transfer(admin, liquidity);
         console.log("Uni v2 tokens burnt");
         return 1;
+    }
+
+    function getTokenPrice(address memeTokenAddress) public view returns (uint256) {
+        Token memeTokenCt = Token(memeTokenAddress);
+        uint currentSupply = memeTokenCt.totalSupply();
+        uint currentSupplyScaled = (currentSupply - INIT_SUPPLY) / DECIMALS;
+        return uint256(calculateCost(currentSupplyScaled, 1));
+    }
+
+    function withdrawPlatformFee() external {
+        require(msg.sender == admin, "not admin");
+        (bool success, ) = admin.call{
+            value: address(this).balance
+        } ("");
+        require(success);
     }
 
     function editFee(uint fee) external {
