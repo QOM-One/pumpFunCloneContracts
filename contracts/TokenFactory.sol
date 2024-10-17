@@ -110,14 +110,6 @@ contract TokenFactory {
         return allTokens;
     }
 
-    function getMarketcap(address memeTokenAddress) public view returns(uint256) {
-
-        Token memeTokenCt = Token(memeTokenAddress);
-        uint currentSupply = memeTokenCt.totalSupply();
-
-
-    }
-
     function buyMemeToken(address memeTokenAddress, uint tokenQty) public payable returns(uint) {
 
         //check if memecoin is listed
@@ -176,7 +168,10 @@ contract TokenFactory {
 
         console.log("New available qty ", MAX_SUPPLY - memeTokenCt.totalSupply());
 
+        uint256 mCap = uint256(calculateCost(currentSupplyScaled, 1)) * MAX_SUPPLY;
+
         emit Buy(block.timestamp, msg.sender, tokenQty_scaled, requiredEth);
+        emit PriceChange(block.timestamp, uint256(calculateCost(currentSupplyScaled, 1)), mCap);
 
         return 1;
     }
@@ -214,8 +209,11 @@ contract TokenFactory {
 
         console.log("ETH returned to seller: ", ethToReturn);
         console.log("New available qty after sale: ", MAX_SUPPLY - memeTokenCt.totalSupply());
+        
+        uint256 mCap = uint256(calculateCost(currentSupplyScaled, 1)) * MAX_SUPPLY;
 
         emit Sell(block.timestamp, msg.sender, tokenQty_scaled, ethToReturn);
+        emit PriceChange(block.timestamp, uint256(calculateCost(currentSupplyScaled, 1)), mCap);
 
         return 1;
     }
