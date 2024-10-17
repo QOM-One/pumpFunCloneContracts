@@ -27,6 +27,7 @@ contract TokenFactory {
     uint MEMECOIN_FUNDING_DEADLINE_DURATION = 10 days;
     uint MEMECOIN_FUNDING_GOAL = 24 ether;
     address public admin;
+    bool tradingEnabled = true;
 
     address UNISWAP_V2_FACTORY_ADDRESS = 0xc9f18c25Cfca2975d6eD18Fc63962EBd1083e978;
     address UNISWAP_V2_ROUTER_ADDRESS = 0x86dcd3293C53Cf8EFd7303B57beb2a3F671dDE98;
@@ -91,7 +92,7 @@ contract TokenFactory {
     }
 
     function createMemeToken(string memory name, string memory symbol, string memory imageUrl, string memory description) public payable returns(address) {
-
+        require(tradingEnabled == true, "trading is disabled");
         //should deploy the meme token, mint the initial supply to the token factory contract
         require(msg.value>= MEMETOKEN_CREATION_PLATFORM_FEE, "fee not paid for memetoken creation");
         Token ct = new Token(name, symbol, INIT_SUPPLY);
@@ -111,7 +112,7 @@ contract TokenFactory {
     }
 
     function buyMemeToken(address memeTokenAddress, uint tokenQty) public payable returns(uint) {
-
+        require(tradingEnabled == true, "trading is disabled");
         //check if memecoin is listed
         require(addressToMemeTokenMapping[memeTokenAddress].tokenAddress!=address(0), "Token is not listed");
         
@@ -177,7 +178,7 @@ contract TokenFactory {
     }
 
     function sellMemeToken(address memeTokenAddress, uint tokenQty) public returns (uint) {
-
+        require(tradingEnabled == true, "trading is disabled");
         // Check if the token is listed
         require(addressToMemeTokenMapping[memeTokenAddress].tokenAddress != address(0), "Token is not listed");
 
@@ -209,7 +210,7 @@ contract TokenFactory {
 
         console.log("ETH returned to seller: ", ethToReturn);
         console.log("New available qty after sale: ", MAX_SUPPLY - memeTokenCt.totalSupply());
-        
+
         uint256 mCap = uint256(calculateCost(currentSupplyScaled, 1)) * MAX_SUPPLY;
 
         emit Sell(block.timestamp, msg.sender, tokenQty_scaled, ethToReturn);
@@ -235,7 +236,7 @@ contract TokenFactory {
         return liquidity;
     }
 
-    function _burnLpTokens(address pool, uint liquidity) internal returns(uint){
+    function _burnLpTokens(address pool, uint liquidity) internal returns(uint) {
         IUniswapV2Pair uniswapv2pairct = IUniswapV2Pair(pool);
         uniswapv2pairct.transfer(admin, liquidity);
         console.log("Uni v2 tokens burnt");
@@ -257,13 +258,19 @@ contract TokenFactory {
         MEMECOIN_FUNDING_DEADLINE_DURATION = duration ;
     }
 
-    function editFactoryContract(address newFactory) external{
+    function editFactoryContract(address newFactory) external {
         require(msg.sender == admin, "not admin");
         UNISWAP_V2_FACTORY_ADDRESS = newFactory;
     }
 
-        function editRouterContract(address newRouter) external{
+    function editRouterContract(address newRouter) external {
         require(msg.sender == admin, "not admin");
         UNISWAP_V2_ROUTER_ADDRESS = newRouter;
     }
+
+    function toggleTrading(bool enabled) external {
+        require(msg.sender == admin, "not admin");
+        tradingEnabled = enabled;
+    }
+
 }
