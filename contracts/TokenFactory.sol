@@ -129,39 +129,19 @@ contract TokenFactory {
         address referral
     ) public payable returns (uint) {
         require(tradingEnabled == true, "trading is disabled");
-        // Check if memecoin is listed
-        require(addressToMemeTokenMapping[memeTokenAddress].tokenAddress != address(0), "Token is not listed");
 
-        memeToken storage listedToken = addressToMemeTokenMapping[memeTokenAddress];
-        Token memeTokenCt = Token(memeTokenAddress);
+        // Get the meme token details and contract
+        (memeToken storage listedToken, Token memeTokenCt) = getMemeToken(memeTokenAddress);
 
         // Ensure funding goal is not met
         require(listedToken.fundingRaised <= MEMECOIN_FUNDING_GOAL, "Funding has already been raised");
 
-        // Ensure there is enough supply to facilitate the purchase
-        uint currentSupply = memeTokenCt.totalSupply();
-        uint available_qty = MAX_SUPPLY - currentSupply;
-        uint scaled_available_qty = available_qty / DECIMALS;
-        uint tokenQty_scaled = tokenQty * DECIMALS;
-        require(tokenQty <= scaled_available_qty, "Not enough available supply");
-
-        // Calculate the cost for purchasing tokens
-        uint currentSupplyScaled = (currentSupply - INIT_SUPPLY) / DECIMALS;
-        uint requiredEth = calculateCost(currentSupplyScaled, tokenQty);
+        // Calculate the cost for purchasing tokens and scale tokenQty
+        (uint requiredEth, uint tokenQty_scaled) = calculatePurchaseCost(memeTokenCt, tokenQty);
         require(msg.value >= requiredEth, "Incorrect value of ETH sent");
 
-        // Calculate the referral fee (0.5% of the ETH sent)  **update to QOM**
-        uint referralFee = (msg.value * 5) / 1000;
-
-        // If referral is provided and valid, transfer the referral fee
-        if (referral != address(0)) {
-            payable(referral).transfer(referralFee);
-        } else {
-            referralFee = 0; // No referral fee if no referral address is provided
-        }
-
-        // Adjust the required ETH to exclude the referral fee
-        uint adjustedEth = msg.value - referralFee;
+        // Handle referral fee and adjust ETH for the purchase
+        (uint referralFee, uint adjustedEth) = handleReferral(referral, msg.value);
 
         // Increment the funding raised with the adjusted ETH
         listedToken.fundingRaised += adjustedEth;
@@ -184,9 +164,9 @@ contract TokenFactory {
         memeTokenCt.mint(tokenQty_scaled, msg.sender);
 
         // Emit events for buy and price change
-        uint256 mCap = uint256(calculateCost(currentSupplyScaled, 1)) * MAX_SUPPLY;
+        uint256 mCap = uint256(calculateCost((memeTokenCt.totalSupply() - INIT_SUPPLY) / DECIMALS, 1)) * MAX_SUPPLY;
         emit Buy(block.timestamp, msg.sender, tokenQty_scaled, requiredEth);
-        emit PriceChange(block.timestamp, uint256(calculateCost(currentSupplyScaled, 1)), mCap);
+        emit PriceChange(block.timestamp, uint256(calculateCost((memeTokenCt.totalSupply() - INIT_SUPPLY) / DECIMALS, 1)), mCap);
 
         return 1;
     }
@@ -263,6 +243,32 @@ contract TokenFactory {
         uint currentSupply = memeTokenCt.totalSupply();
         uint currentSupplyScaled = (currentSupply - INIT_SUPPLY) / DECIMALS;
         return uint256(calculateCost(currentSupplyScaled, 1));
+    }
+
+    function getMemeToken(address memeTokenAddress) internal view returns (memeToken storage, Token) {
+        require(addressToMemeTokenMapping[memeTokenAddress].tokenAddress != address(0), "Token is not listed");
+        memeToken storage listedToken = addressToMemeTokenMapping[memeTokenAddress];
+        Token memeTokenCt = Token(memeTokenAddress);
+        return (listedToken, memeTokenCt);
+    }
+
+    function calculatePurchaseCost(Token memeTokenCt, uint tokenQty) internal view returns (uint requiredEth, uint tokenQtyScaled) {
+        uint currentSupply = memeTokenCt.totalSupply();
+        uint currentSupplyScaled = (currentSupply - INIT_SUPPLY) / DECIMALS;
+        tokenQtyScaled = tokenQty * DECIMALS;
+        requiredEth = calculateCost(currentSupplyScaled, tokenQty);
+        return (requiredEth, tokenQtyScaled);
+    }
+
+    function handleReferral(address referral, uint ethAmount) internal returns (uint referralFee, uint adjustedEth) {
+        referralFee = (ethAmount * 5) / 1000;  // 0.5%
+        if (referral != address(0)) {
+            payable(referral).transfer(referralFee);
+        } else {
+            referralFee = 0;
+        }
+        adjustedEth = ethAmount - referralFee;
+        return (referralFee, adjustedEth);
     }
 
     function withdrawPlatformFee() external {
