@@ -150,7 +150,7 @@ contract TokenFactory {
         listedToken.fundingRaised += adjustedEth;
 
         // Check if funding goal is met
-        if (listedToken.fundingRaised >= MEMECOIN_FUNDING_GOAL) {
+        if (listedToken.fundingRaised >= MEMECOIN_FUNDING_GOAL - listedToken.referralFees) {
             // Create liquidity pool
             address pool = _createLiquidityPool(memeTokenAddress);
 

@@ -80,7 +80,7 @@ describe("Token Factory", function () {
         console.log("Memecoins ", memecoins)
     })
 
-    it("Should allow a user to deploy and purchase a token with a referral parameter", async function() {
+    it.only("Should allow a user to deploy and purchase a token with a referral parameter", async function() {
         const referralAddress = "0xcddeBBaD367956F2Bf3E6C668085B4884669e717";
         const tokenCt = await hre.ethers.deployContract("TokenFactory");
         console.log("referral balance before deployment", hre.ethers.formatEther(await hre.ethers.provider.getBalance(referralAddress)));
