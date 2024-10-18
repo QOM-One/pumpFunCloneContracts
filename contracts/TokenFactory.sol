@@ -15,6 +15,7 @@ contract TokenFactory {
         string description;
         string tokenImageUrl;
         uint fundingRaised;
+        uint referralFees; 
         address tokenAddress;
         address creatorAddress;
     }
@@ -27,6 +28,7 @@ contract TokenFactory {
     uint REFERRAL_CREATION_FEE = 0.0001 ether;
     uint MEMECOIN_FUNDING_DEADLINE_DURATION = 10 days;
     uint MEMECOIN_FUNDING_GOAL = 24 ether;
+    uint public totalReferralFees;
     address public admin;
     bool tradingEnabled = true;
 
@@ -103,6 +105,7 @@ contract TokenFactory {
             symbol, 
             description, 
             imageUrl, 
+            0,
             0, 
             memeTokenAddress,
             msg.sender
@@ -134,14 +137,14 @@ contract TokenFactory {
         (memeToken storage listedToken, Token memeTokenCt) = getMemeToken(memeTokenAddress);
 
         // Ensure funding goal is not met
-        require(listedToken.fundingRaised <= MEMECOIN_FUNDING_GOAL, "Funding has already been raised");
+        require(listedToken.fundingRaised <= (MEMECOIN_FUNDING_GOAL - listedToken.referralFees), "Funding has already been raised");
 
         // Calculate the cost for purchasing tokens and scale tokenQty
         (uint requiredEth, uint tokenQty_scaled) = calculatePurchaseCost(memeTokenCt, tokenQty);
         require(msg.value >= requiredEth, "Incorrect value of ETH sent");
 
         // Handle referral fee and adjust ETH for the purchase
-        (uint referralFee, uint adjustedEth) = handleReferral(referral, msg.value);
+        (uint referralFee, uint adjustedEth) = handleReferral(listedToken, referral, msg.value);
 
         // Increment the funding raised with the adjusted ETH
         listedToken.fundingRaised += adjustedEth;
@@ -155,6 +158,7 @@ contract TokenFactory {
             uint tokenAmount = INIT_SUPPLY;
             uint ethAmount = listedToken.fundingRaised;
             uint liquidity = _provideLiquidity(memeTokenAddress, tokenAmount, ethAmount);
+            console.log("Uniswap provided liquidty ", liquidity);
 
             // Burn LP tokens
             _burnLpTokens(pool, liquidity);
@@ -171,14 +175,13 @@ contract TokenFactory {
         return 1;
     }
 
-
     function sellMemeToken(address memeTokenAddress, uint tokenQty) public returns (uint) {
         require(tradingEnabled == true, "trading is disabled");
+
         // Check if the token is listed
         require(addressToMemeTokenMapping[memeTokenAddress].tokenAddress != address(0), "Token is not listed");
 
         memeToken storage listedToken = addressToMemeTokenMapping[memeTokenAddress];
-
         Token memeTokenCt = Token(memeTokenAddress);
 
         // Get the user's token balance to ensure they have enough to sell
@@ -189,9 +192,30 @@ contract TokenFactory {
         // Ensure that there's enough ETH liquidity in the contract to facilitate the sale
         uint currentSupply = memeTokenCt.totalSupply();
         uint currentSupplyScaled = (currentSupply - INIT_SUPPLY) / DECIMALS;
-        uint ethToReturn = calculateCost(currentSupplyScaled - tokenQty, tokenQty); // Cost in reverse
 
-        require(address(this).balance >= ethToReturn, "Not enough ETH in contract to facilitate the sale");
+        // Calculate the raw ETH to return
+        uint ethToReturnRaw = calculateCost(currentSupplyScaled - tokenQty, tokenQty); 
+
+        // Conditionally adjust the ETH to return based on referral fees
+        uint ethToReturn;
+        if (listedToken.referralFees > 0) {
+           
+            ethToReturn = (ethToReturnRaw * 995) / 1000;  // Adjust for referral fees (99.5%)
+        } else {
+            // No referral fees taken, so return the raw amount
+            ethToReturn = ethToReturnRaw;
+        }
+
+        // Check contract's current balance and available ETH
+        console.log("Contract ETH balance:", address(this).balance);
+        console.log("Referral Fees deducted:", listedToken.referralFees);
+
+        // Subtract referral fees from the available ETH for the sale
+        uint availableEth = address(this).balance;
+        console.log("Available ETH after deducting referral fees:", availableEth);
+
+        // ETH in the contract after adjusting for referral fees
+        require(availableEth >= ethToReturn, "Not enough ETH in contract to facilitate the sale");
 
         // Burn the tokens from the user's balance
         memeTokenCt.burn(msg.sender, address(this), tokenQty_scaled);
@@ -199,12 +223,11 @@ contract TokenFactory {
         // Update the total funding raised to reflect the ETH being taken out
         listedToken.fundingRaised -= ethToReturn;
 
-        // Send the ETH to the user
         (bool sent, ) = msg.sender.call{value: ethToReturn}("");
         require(sent, "Failed to send ETH to the seller");
 
-        console.log("ETH returned to seller: ", ethToReturn);
-        console.log("New available qty after sale: ", MAX_SUPPLY - memeTokenCt.totalSupply());
+        console.log("ETH returned to seller:", ethToReturn);
+        console.log("New available qty after sale:", MAX_SUPPLY - memeTokenCt.totalSupply());
 
         uint256 mCap = uint256(calculateCost(currentSupplyScaled, 1)) * MAX_SUPPLY;
 
@@ -213,6 +236,7 @@ contract TokenFactory {
 
         return 1;
     }
+
 
     function _createLiquidityPool(address memeTokenAddress) internal returns(address) {
         IUniswapV2Factory factory = IUniswapV2Factory(UNISWAP_V2_FACTORY_ADDRESS);
@@ -260,16 +284,19 @@ contract TokenFactory {
         return (requiredEth, tokenQtyScaled);
     }
 
-    function handleReferral(address referral, uint ethAmount) internal returns (uint referralFee, uint adjustedEth) {
+    function handleReferral(memeToken storage listedToken, address referral, uint ethAmount) internal returns (uint referralFee, uint adjustedEth) {
         referralFee = (ethAmount * 5) / 1000;  // 0.5%
         if (referral != address(0)) {
             payable(referral).transfer(referralFee);
+            listedToken.referralFees += referralFee;
         } else {
             referralFee = 0;
         }
         adjustedEth = ethAmount - referralFee;
         return (referralFee, adjustedEth);
     }
+
+
 
     function withdrawPlatformFee() external {
         require(msg.sender == admin, "not admin");

@@ -95,4 +95,21 @@ describe("Token Factory", function () {
         const memecoins = await tokenCt.getAllMemeTokens();
         console.log("Memecoins ", memecoins)
     })
+
+    it("Should allow a user to deploy and purchase a token with a referral parameter then sell", async function() {
+        const referralAddress = "0xcddeBBaD367956F2Bf3E6C668085B4884669e717";
+        const tokenCt = await hre.ethers.deployContract("TokenFactory");
+        console.log("referral balance before deployment", hre.ethers.formatEther(await hre.ethers.provider.getBalance(referralAddress)));
+        const tx1 = await tokenCt.createMemeToken("Test", "TEST", "img://img.png", "hello there", referralAddress, {
+            value: hre.ethers.parseEther("0.0002")
+        });
+        const memeTokenAddress = await tokenCt.memeTokenAddresses(0)
+        const tx2 = await tokenCt.buyMemeToken(memeTokenAddress, 500000, referralAddress, {
+            value: hre.ethers.parseEther("15")
+        });
+        await tokenCt.sellMemeToken(memeTokenAddress, 500000)
+        console.log("referral balance after deployment and purchase", hre.ethers.formatEther(await hre.ethers.provider.getBalance(referralAddress)));
+        const memecoins = await tokenCt.getAllMemeTokens();
+        console.log("Memecoins ", memecoins)
+    })
 })
